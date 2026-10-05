@@ -142,3 +142,33 @@ def test_a_standalone_run_still_serves_a_card(monkeypatch):
     monkeypatch.delenv("ENVIRONMENT_NAME", raising=False)
     served = _request(build_server().streamable_http_app(), "GET", WELL_KNOWN_PATH)
     assert served.json()["name"] == "mobilerun"
+
+
+def test_standalone_the_server_listens_on_loopback_with_rebinding_protection(monkeypatch):
+    """The endpoint has no auth and every tool drives a paid phone, so `python -m ...` must not put it on the
+    LAN, and a web page must not reach it through a rebound DNS name."""
+    from agentenv_mobilerun.server.main import bind_host
+
+    monkeypatch.setenv("MOBILERUN_API_KEY", "dr_sk_test")
+    monkeypatch.setenv("MOBILERUN_DEVICE_ID", "dev-1")
+    monkeypatch.setenv("MOBILERUN_CAPABILITIES", "accessibility=true")
+    monkeypatch.delenv("MCP_HOST", raising=False)
+    assert bind_host() == "127.0.0.1"
+    server = build_server()
+    assert server.settings.host == "127.0.0.1"
+    assert server.settings.transport_security.enable_dns_rebinding_protection is True
+
+
+def test_in_the_image_it_listens_on_all_interfaces_for_the_gateway(monkeypatch):
+    """The gateway reaches the server by its compose hostname, which the localhost allow-list would reject."""
+    from pathlib import Path
+
+    monkeypatch.setenv("MOBILERUN_API_KEY", "dr_sk_test")
+    monkeypatch.setenv("MOBILERUN_DEVICE_ID", "dev-1")
+    monkeypatch.setenv("MOBILERUN_CAPABILITIES", "accessibility=true")
+    monkeypatch.setenv("MCP_HOST", "0.0.0.0")
+    server = build_server()
+    assert server.settings.host == "0.0.0.0"
+    assert server.settings.transport_security.enable_dns_rebinding_protection is False
+    dockerfile = (Path(__file__).resolve().parents[1] / "src/agentenv_mobilerun/server/Dockerfile").read_text()
+    assert "MCP_HOST=0.0.0.0" in dockerfile

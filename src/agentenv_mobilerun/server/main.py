@@ -20,7 +20,8 @@ Configuration (all injected by :class:`~agentenv_mobilerun.env.MobileRunEnv`):
                              this value is rendered into docker-compose YAML, where
                              ``": "`` is illegal. When unset, the server reads the
                              capability map itself at startup.
-``MCP_HOST`` / ``MCP_PORT``  bind address; defaults ``0.0.0.0:18765``
+``MCP_HOST`` / ``MCP_PORT``  bind address; defaults ``127.0.0.1:18765``. The image sets
+                             ``MCP_HOST=0.0.0.0``, which the gateway needs to reach it.
 ===========================  ====================================================
 
 **Coordinate contract.** Callers work in **screenshot pixels** — read a coordinate off
@@ -60,6 +61,7 @@ from agentenv_protocol import (
     EnvironmentCard,
 )
 from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.transport_security import TransportSecuritySettings
 from PIL import Image as PILImage
 
 from agentenv_mobilerun.client import GLOBAL_ACTIONS, MobileRunClient, MobileRunError
@@ -615,6 +617,31 @@ def _protocol_app(name: str) -> AgentEnvFastMCPApplication:
     return AgentEnvFastMCPApplication(EnvironmentCard(name=name), NoDataPlane())
 
 
+def bind_host() -> str:
+    """Where the server listens: loopback unless told otherwise.
+
+    The endpoint has no authentication of its own, and every tool on it drives a paid phone
+    and returns its screen. In the image that is fine and necessary: the container binds all
+    interfaces (the Dockerfile sets ``MCP_HOST=0.0.0.0``) so the gateway can reach it, and
+    the gateway is the only thing on that network. Run standalone with ``python -m``, the
+    same default would put the phone on the whole LAN, so standalone means loopback.
+    """
+    return (os.environ.get("MCP_HOST") or "127.0.0.1").strip()
+
+
+def transport_security(host: str) -> Optional[TransportSecuritySettings]:
+    """DNS-rebinding protection: the MCP library's own, except where the gateway needs it off.
+
+    On loopback, ``None`` lets FastMCP enable it with a localhost allow-list, which is what
+    stops a web page from reaching this endpoint through a rebound DNS name. Bound to all
+    interfaces inside the gateway's network, the gateway calls the server by its compose
+    hostname, which that allow-list would reject, so it is off there and only there.
+    """
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return None
+    return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+
 def build_server() -> FastMCP:
     """Construct the FastMCP app with the tools this device actually supports."""
     api_key = _require("MOBILERUN_API_KEY")
@@ -634,12 +661,8 @@ def build_server() -> FastMCP:
             logger.warning("could not read the capability map (%s); registering the full surface", exc)
             capabilities = {}
 
-    mcp = FastMCP("MobileRun")
-    mcp.settings.host = os.environ.get("MCP_HOST", "0.0.0.0")
-    mcp.settings.port = int(os.environ.get("MCP_PORT", "18765"))
-    # Gateways reach MCP servers by their compose hostname, which mcp's default
-    # localhost-only allowlist rejects.
-    mcp.settings.transport_security.enable_dns_rebinding_protection = False
+    mcp = FastMCP("MobileRun", host=bind_host(), port=int(os.environ.get("MCP_PORT", "18765")),
+                  transport_security=transport_security(bind_host()))
 
     for name in select_tools(capabilities):
         method = getattr(tools, name)

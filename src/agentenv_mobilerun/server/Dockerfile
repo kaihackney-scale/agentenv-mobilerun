@@ -16,7 +16,8 @@ FROM python:3.12-slim@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b
 WORKDIR /app
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
-    MCP_PORT=18765
+    MCP_PORT=18765 \
+    MCP_HOST=0.0.0.0
 
 COPY agentenv_mobilerun/server/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
