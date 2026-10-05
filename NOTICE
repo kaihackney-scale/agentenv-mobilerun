@@ -1,0 +1,8 @@
+agentenv-mobilerun
+Copyright 2026 the agentenv-mobilerun contributors
+
+This product is licensed under the Apache License, Version 2.0 (LICENSE).
+
+The MCP server image built from this repository contains MobileRun's mobilerun-sdk (Apache-2.0),
+the MCP Python SDK (MIT), agentenv-framework-protocol (Apache-2.0), httpx (BSD-3-Clause), Pillow
+(MIT-CMU) and their dependencies, each under its own licence.

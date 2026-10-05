@@ -1,0 +1,27 @@
+[
+  {
+    "id": "mobilerun-deploy-env",
+    "type": "deploy_env",
+    "env_id": "mobilerun",
+    "ttl_seconds": 1800
+  },
+  {
+    "id": "mobilerun-deploy-agent",
+    "type": "deploy_agent",
+    "env_step_id": "mobilerun-deploy-env",
+    "agent_name": "mobile-agent"
+  },
+  {
+    "id": "mobilerun-prompt",
+    "type": "prompt_agent",
+    "agent_name": "mobile-agent",
+    "prompt": "You are driving a real phone through the mobilerun_* tools. Take a screenshot first and look at it before every action. Coordinates you read off a screenshot are exactly what the tap tool expects - do not rescale them. Task: open the device Settings app and navigate to the display settings screen. When you are done, take a final screenshot and describe what is on it.",
+    "timeout_seconds": 600
+  },
+  {
+    "id": "mobilerun-collect",
+    "type": "mobilerun_collect_recording",
+    "key_prefix": "recordings",
+    "depends_on": [{ "task_step_id": "mobilerun-prompt" }]
+  }
+]

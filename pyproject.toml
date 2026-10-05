@@ -1,0 +1,101 @@
+[project]
+name = "agentenv-mobilerun"
+version = "0.1.0"
+description = "MobileRun cloud-phone environment plugin for agent-env — drive a real Android phone or iPhone as an AgentEnv environment."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["agent-env", "agentenv", "mobilerun", "android", "ios", "computer-use", "mcp"]
+
+# httpx is the only runtime dependency of the device client and the MCP server image.
+# agent-env is needed by the Env subclass / task step / CLI, not by the image.
+dependencies = [
+    # The vendor's official SDK. It owns request construction and the device plane's
+    # quirks -- comma-joined `state`, the mandatory empty body on app start, PATCH-to-stop
+    # vs DELETE-to-uninstall -- which this package previously hand-rolled and had to
+    # discover by hand. httpx stays: the SDK is built on it, and the client is injected.
+    "mobilerun-sdk>=5.5,<6",
+    "httpx>=0.27",
+    # Screenshot re-encoding in the MCP server (never resizing — see server/main.py).
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# Everything that plugs into an agent-env installation. The MCP server image
+# deliberately does NOT install this extra (see src/agentenv_mobilerun/server/requirements.txt).
+plugin = [
+    "agentenv-framework>=0.9.1188",
+]
+# Deliberately NOT agentenv-framework. The seven test modules that exercise the REST
+# client and the MCP server need nothing but this package's own runtime deps, which is
+# the same split the image enforces (see server/requirements.txt). The two modules that
+# do need the framework skip themselves when it is absent, so `[dev]` alone is a real
+# test run rather than a partial one that looks broken. Install `[dev,plugin]` to run
+# everything -- which is what CI will do once agentenv-framework is on PyPI.
+# The MCP server module. `mcp` was previously declared only in the image's
+# requirements.txt, so `pip install agentenv-mobilerun` could not import
+# agentenv_mobilerun.server.main at all -- the module ships in the wheel, so its
+# dependency belongs here too. Upper bound because an unpinned fastmcp major has
+# broken this server surface before.
+server = [
+    "mcp>=1.0,<2",
+    # The protocol's server SDK: it serves the env card and the core data plane, so the
+    # card cannot advertise a route the server does not mount. Published as
+    # `agentenv-framework-protocol` (the name follows `agentenv-framework`, not the repo
+    # directory). Floor, not a pin: agentenv-framework pins an exact version of it, and a
+    # pin here would collide with that on the next framework release.
+    "agentenv-framework-protocol>=0.1.278,<0.2",
+]
+# agentenv-framework published on 2026-09-30, so dev pulls it in and the whole suite
+# runs -- including the two modules that exercise the Env and the task step. While those
+# skipped, a NameError in env.py passed CI green, which is exactly what happened once.
+#
+# The marker is load-bearing: the framework requires Python >=3.11, and this package
+# supports 3.10 because the half the container ships (the REST client and the MCP server)
+# does. On 3.10 those two modules skip themselves and the rest still runs, which is a
+# real result for the container half rather than a broken install.
+dev = [
+    "agentenv-mobilerun[server]",
+    "agentenv-framework>=0.9.1254; python_version >= '3.11'",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+# Everything this package contributes is registered by installing it. The entry-point
+# name is the registry key — the `type` string a stored document addresses the class by —
+# so nothing here needs a line in the user's config.toml, and two plugins can be installed
+# side by side without one clobbering the other's config file.
+[project.entry-points."agent_env.envs"]
+mobilerun = "agentenv_mobilerun.env:MobileRunEnv"
+
+[project.entry-points."agent_env.task_steps"]
+mobilerun_collect_recording = "agentenv_mobilerun.steps.collect_recording:CollectRecordingStep"
+
+# The bundle ships inside the wheel, so `pip install agentenv-mobilerun` is followed by
+# `agent-env run mobilerun` with nothing to clone. The entry-point VALUE names the package
+# and the NAME is the folder inside it, so this resolves to
+# agentenv_mobilerun/bundles/mobilerun/.
+[project.entry-points."agent_env.bundles"]
+mobilerun = "agentenv_mobilerun.bundles"
+
+# Shows up as `agent-env mobilerun ...`.
+[project.entry-points."agent_env.cli_plugins"]
+mobilerun = "agentenv_mobilerun.cli:mobilerun"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentenv_mobilerun"]
+
+[tool.pytest.ini_options]
+# strict, matching agent-env's root config: under the repo's CI the rootdir is the repo
+# root and its config wins, so "auto" here would mean unmarked coroutines silently do
+# not run in CI while passing locally. Every async test carries @pytest.mark.asyncio.
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110

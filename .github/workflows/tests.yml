@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      # `[dev]` now includes agentenv-framework, which published on 2026-09-30, so the
+      # whole suite runs here -- no module skips itself in CI any more.
+      - name: Install
+        run: pip install -e '.[dev]'
+      # No device, API key or network access: the client is driven through
+      # httpx.MockTransport, so request construction is exercised for real.
+      # -ra so the skipped modules and their reason appear in the log rather than
+      # quietly reducing the count.
+      # Undefined names, which the test run above CANNOT catch: the two modules that
+      # import agentenv-framework skip themselves when it is absent, so a NameError in
+      # env.py passes CI green. That happened -- SUPPORTED_PLATFORMS and MCP_PORT were
+      # deleted by a refactor and only a framework-present run noticed. ruff needs no
+      # framework and flags it in both files.
+      - name: Undefined names
+        run: pip install ruff && ruff check --select F821 src tests
+      - name: Test
+        run: pytest -q -ra

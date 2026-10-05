@@ -1,0 +1,17 @@
+# Dependencies of the MCP server IMAGE only.
+#
+# Deliberately not agent-env: the server talks to the MobileRun REST API and speaks MCP,
+# and nothing else. Keeping agent-env out of the image means the plugin's env class and
+# the container can be upgraded independently, and the image stays small enough to
+# side-load onto a gateway VM quickly.
+# The vendor SDK, which the REST client delegates to. It brings pydantic/anyio in
+# with it -- the cost of not hand-rolling the device plane's wire contract.
+mobilerun-sdk>=5.5,<6
+httpx>=0.27
+mcp>=1.0,<2
+# Serves the env card and the core data plane (see server/main.py). Brings only
+# httpx/pydantic/starlette, all of which are here already.
+agentenv-framework-protocol>=0.1.278,<0.2
+# Screenshots only: re-encodes the device's ~4 MB PNG to ~280 KB of JPEG at unchanged
+# dimensions. Never used to resize — the dimensions are the coordinate space.
+Pillow>=10.0
