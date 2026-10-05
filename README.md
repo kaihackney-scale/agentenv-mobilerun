@@ -12,13 +12,15 @@ real an interface as there is. This repository is an environment plugin for the
 [AgentEnv Framework](https://www.agentenvframework.com), Scale AI's open-source framework for building RL
 environments.
 
-![A real iPhone 15 Pro beside the live trace of the MCP tool calls driving it: screenshot, tap Settings, read ui_state, tap Display & Brightness, go back, press home](docs/media/mobilerun-settings.gif)
+![Claude Sonnet 5.5 gets walking directions from the Brandenburg Gate to Museum Island in Apple Maps on a real iPhone, its thoughts and tool calls alongside](docs/media/mobilerun-maps-agent.gif)
 
-*A real iPhone 15 Pro on MobileRun, deployed with `agent-env env deploy`, beside the trace of the `mobilerun_*` MCP
-tool calls driving it: each call appears as it is issued and its result as the tool returned it, and an amber ring
-marks every touch where and when the device registered it. The phone is the device's own server-side recording; the
-rings are timed by that recording's trajectory. 18 seconds, real calls on a real device, made by a scripted client
-rather than a model, so it shows exactly the tool surface an agent gets.*
+*Claude Sonnet 5.5, given one sentence, drives a real iPhone 15 Pro on MobileRun to walking directions from the
+Brandenburg Gate to Museum Island: it opens Maps from the home screen, searches, notices its query was cut to "Mus",
+clears and retypes it, types the start point by hand (Location Services is off on the phone) and switches to walking.
+23 tool calls in 2 minutes 23 seconds, shown at 4×. On the right, what the model wrote before each action and every
+`mobilerun_*` call with its result; on the left, the device's own server-side recording, with each tap ringed where and
+when the device registered it. The run ends on an end-state check read from the phone's `ui_state` after the model said
+it was done: Museum Island on screen, walking mode, a duration.*
 
 **Contents:** [Run it yourself](#run-it-yourself) · [Built on the AgentEnv Framework](#built-on-the-agentenv-framework) ·
 [The environment's tools](#the-environments-tools) · [Recording](#recording) · [What has been verified](#what-has-been-verified) ·
@@ -194,15 +196,17 @@ seconds, and each recording has a `retentionDays` after which MobileRun returns 
 
 **Live, 2026-10-05**, on rented iPhone 15 Pros, published `agentenv-framework` 0.9.1267 and the local sandbox:
 `setup`, `env deploy`, the env card the gateway composes (with this server's own card as its `mobilerun` child), all
-18 tools listed through the gateway, `screenshot`, `ui_state`, `tap`, `scroll` and `press_key home` executing and
-observed on the device (the gif above shows the taps and home), the server-side recording and its trajectory, and
-teardown through the env's reattach and `close()`.
+18 tools listed through the gateway, `screenshot`, `ui_state`, `tap`, `scroll`, `type_text` (plain and with `clear`)
+and `press_key home` executing and observed on the device, the server-side recording and its trajectory, teardown
+through the env's reattach and `close()`, and a model (Claude Sonnet 5.5, by function calling against the env's MCP
+tools) completing a 23-step task end to end: the gif above.
 Earlier, on 2026-09-21: device listing and resolution, the capability map, the health probe, `doctor`, the
 pixel-to-point conversion, screenshots, `ui_state` compaction, `list_apps` and the full recording download path.
 
 **Not verified yet**: anything on **Android** (the account's only Android device is in maintenance), so treat the
-Android path, including `press_key`'s Android codes, as unexercised; an agent-driven `agent-env run mobilerun`; and
-`type_text`, `clear_text`, `double_tap`, `long_press`, `open_deep_link` and the clipboard tools on a device. See
+Android path, including `press_key`'s Android codes, as unexercised; the bundle's `agent-env run mobilerun`, which goes
+through an A2A agent rather than a model calling the tools directly; and `clear_text`, `double_tap`, `long_press`,
+`open_deep_link` and the clipboard tools on a device. See
 [Known limits](#known-limits) for `launch_app`.
 
 ## Known limits
@@ -217,6 +221,8 @@ Stated rather than papered over.
 - **`launch_app` on iOS needs care.** On one iPhone, launching Settings by bundle id returned `ok`, Settings never
   opened, and the phone stopped answering screenshots and gestures while still reporting `ready`. Tapping the app's
   icon instead worked on another phone. One case, so not a rule, but prefer the icon on iOS until it is understood.
+- **Location Services is off on MobileRun's phones.** Maps and anything else that needs "my location" asks for a start
+  point instead, so give tasks explicit places.
 - **A badged icon is labelled by its badge.** In an iPhone's accessibility tree, the Settings icon with a red badge
   is labelled `1 new item`, not `Settings`. Find icons by what the screenshot shows, not by label alone.
 - **`press_key` codes are Android's.** `POST /devices/{id}/global` takes a bare integer and documents no enum. On an
