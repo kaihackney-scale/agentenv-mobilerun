@@ -14,13 +14,13 @@ environments.
 
 ![Claude Sonnet 5.5 gets walking directions from the Brandenburg Gate to Museum Island in Apple Maps on a real iPhone, its thoughts and tool calls alongside](docs/media/mobilerun-maps-agent.gif)
 
-*Claude Sonnet 5.5, given one sentence, drives a real iPhone 15 Pro on MobileRun to walking directions from the
-Brandenburg Gate to Museum Island: it opens Maps from the home screen, searches, notices its query was cut to "Mus",
-clears and retypes it, types the start point by hand (Location Services is off on the phone) and switches to walking.
-23 tool calls in 2 minutes 23 seconds, shown at 4×. On the right, what the model wrote before each action and every
-`mobilerun_*` call with its result; on the left, the device's own server-side recording, with each tap ringed where and
-when the device registered it. The run ends on an end-state check read from the phone's `ui_state` after the model said
-it was done: Museum Island on screen, walking mode, a duration.*
+*`agent-env run mobilerun --model anthropic/claude-sonnet-5-5`: the bundle this package ships, on a real iPhone 15 Pro
+on MobileRun. Given one sentence, the model opens Maps from the home screen, sets the Brandenburg Gate as the
+destination by mistake, reads the "Cannot Provide Directions" alert, rebuilds the route the other way round, drags the
+rows to swap it, and switches to walking: 22 tool calls in under two minutes, shown at 4×. On the right, what it wrote
+before each action and every `mobilerun_*` call with its result; on the left, the device's own server-side recording,
+each tap ringed where and when the device registered it. The run is graded by `mobilerun_check_screen` from the
+phone's `ui_state` once the model says it is done, and agent-env reports it the way the panel ends: passed (check: 1).*
 
 **Contents:** [Run it yourself](#run-it-yourself) · [Built on the AgentEnv Framework](#built-on-the-agentenv-framework) ·
 [The environment's tools](#the-environments-tools) · [Recording](#recording) · [What has been verified](#what-has-been-verified) ·
@@ -38,7 +38,7 @@ pip install agentenv-framework
 agent-env plugin add 'agentenv-mobilerun @ git+https://github.com/kaihackney-scale/agentenv-mobilerun'
 export MOBILERUN_API_KEY=dr_sk_...
 
-agent-env mobilerun doctor --skip-agent --platform ios   # key, devices, capabilities, a screenshot health probe
+agent-env mobilerun doctor --skip-model                  # key, devices, capabilities, a screenshot health probe
 agent-env mobilerun setup --id mobilerun --platform ios  # build the MCP server image, register the env
 agent-env env deploy --id mobilerun                      # resolve an idle phone and deploy it
 ```
@@ -56,29 +56,42 @@ Env MCP Url: http://127.0.0.1:62694/mcp
 ```
 
 Hand that MCP URL to an agent, or to any MCP client, and it has a phone. `setup --device ID` pins one device; without
-it each deploy resolves an idle one that passes its health probe. Use the same `--platform` for `doctor` and `setup`:
-`doctor` defaults to Android, and checks for a device of that platform.
+it each deploy resolves an idle one that passes its health probe. `--skip-model` because deploying the env needs no
+model: you get a gateway and its MCP address, and drive the phone yourself.
 
 ### The bundled task
 
-The package also ships a bundle, `mobilerun`: deploy the env, hand the phone to an agent, ask it to open Settings and
-the display screen, and collect the recording. The recording only exists if the env was set up with `--record`;
-without it the collect step finds nothing and says so.
+The package also ships a bundle, `mobilerun`, with the task in the gif: deploy the env, seat a model on the phone, ask
+it for walking directions in Maps, grade the screen it leaves, and keep the recording.
 
 ```bash
 agent-env mobilerun setup --id mobilerun --platform ios --record
-agent-env run                                  # lists the installed bundles; mobilerun is one
-agent-env mobilerun doctor --platform ios      # this time without --skip-agent
-agent-env run mobilerun
+export LITELLM_BASE_URL=https://your-endpoint LITELLM_API_KEY=...   # or [model] in .agentenv/config.toml
+agent-env mobilerun doctor                     # this time without --skip-model
+agent-env run mobilerun --model anthropic/claude-sonnet-5-5
 ```
 
-**It needs an A2A agent, and agent-env ships none.** The task's `deploy_agent` step names no agent, so it deploys
-your configured default: `[agents] default_a2a_agent_id` in `.agentenv/config.toml`, else `a2a-default`, which on a
-clean install does not exist. Point the setting at any A2A agent that drives MCP tools, or register one under that id
-with `agent-env a2a-agent put --id a2a-default --dockerfile path/to/your/agent/Dockerfile`; the protocol package's
-`a2a_agent` SDK (`pip install 'agentenv-framework-protocol[agent]'`) is one way to build it. The task names no agent so
-that your default wins, which means agent-env's own run preflight cannot see a missing one; `doctor` resolves it the
-way `deploy_agent` does and fails first, before any phone or gateway is spent.
+It ends like this:
+
+```
+tasks/maps-walking.json v1: passed (check: 1), 185.2s, instance @local/agentenv-mobilerun/mobilerun/maps-walking-...
+```
+
+The task is four steps:
+
+| Step | What it does |
+|---|---|
+| `deploy_env` | deploys the `mobilerun` env: resolves and health-probes a phone, starts its recording, puts the MCP server up |
+| `mobilerun_play` | seats the model: it drives the `mobilerun_*` tools by function calling, one per turn, until it says it is done; the transcript is kept in the run's metadata |
+| `mobilerun_check_screen` | grades the run from the text on the final screen: Museum Island, Brandenburg Gate, walking, a duration; scores 1 or 0 |
+| `mobilerun_collect_recording` | copies the video and trajectory into your object store (`--record` at setup starts it) |
+
+**No agent to build.** Any model behind an OpenAI-compatible `/v1/chat/completions` endpoint can be seated: the step
+uses agent-env's standard model endpoint, and `--model` picks the model (the task's default is a LiteLLM id; change it
+to one your endpoint serves). An endpoint that needs extra headers on every request, such as attribution or routing,
+gets them from `MOBILERUN_MODEL_HEADERS`, a JSON object. Before the episode the step force-quits Maps and goes home, so
+a phone that has run the task before doesn't start on the answer. To drive the phone with an A2A agent instead, see
+[`examples/`](examples/).
 
 ## Built on the AgentEnv Framework
 
@@ -103,9 +116,9 @@ nothing else. Each piece maps to a framework concept:
 |---|---|
 | [Environment](https://www.agentenvframework.com/docs/environments/creating): MCP tools and an env card in one container | `src/agentenv_mobilerun/server/main.py`: up to 18 `mobilerun_*` tools, gated by what the phone supports, plus the env card and core data plane served by the protocol SDK (no data operations: a phone has no database to load); `env.py`: `MobileRunEnv`, which resolves and health-probes a phone, then deploys the server behind an agent-env gateway |
 | [Plugin](https://www.agentenvframework.com/docs/plugins/environment-plugins): a pip package with entry points | `pyproject.toml`: the env (`agent_env.envs`), the task step (`agent_env.task_steps`), the bundle (`agent_env.bundles`) and the `agent-env mobilerun` commands (`agent_env.cli_plugins`) |
-| [Task steps](https://www.agentenvframework.com/docs/plugins/task-step-plugins) | `mobilerun_collect_recording` in `src/agentenv_mobilerun/steps/collect_recording.py` |
-| [Tasks](https://www.agentenvframework.com/docs/tasks/creating) | `src/agentenv_mobilerun/bundles/mobilerun/`: the `open-settings` task and the `smoke` eval, run with `agent-env run mobilerun` |
-| [Agents](https://www.agentenvframework.com/docs/agents/creating): A2A agents handed the env's MCP server | none shipped: any A2A agent that drives MCP tools; the task deploys your default |
+| [Task steps](https://www.agentenvframework.com/docs/plugins/task-step-plugins) | `mobilerun_play` (seat a model on the phone), `mobilerun_check_screen` (grade the final screen) and `mobilerun_collect_recording` (keep the recording), in `src/agentenv_mobilerun/steps/` |
+| [Tasks](https://www.agentenvframework.com/docs/tasks/creating) and verifiers | `src/agentenv_mobilerun/bundles/mobilerun/`: the graded `maps-walking` task and the `smoke` eval, run with `agent-env run mobilerun` |
+| [Agents](https://www.agentenvframework.com/docs/agents/creating): A2A agents handed the env's MCP server | the bundle seats a model directly instead, so none is needed; `examples/` shows the A2A form |
 | [Registry](https://www.agentenvframework.com/docs/registry): versioned images, envs and runs | `agent-env mobilerun setup` registers the image artifact and the env; deploys and recordings go to your configured stores |
 
 Start with the framework's [getting started](https://www.agentenvframework.com/docs/getting-started) and
@@ -196,17 +209,17 @@ seconds, and each recording has a `retentionDays` after which MobileRun returns 
 
 **Live, 2026-10-05**, on rented iPhone 15 Pros, published `agentenv-framework` 0.9.1267 and the local sandbox:
 `setup`, `env deploy`, the env card the gateway composes (with this server's own card as its `mobilerun` child), all
-18 tools listed through the gateway, `screenshot`, `ui_state`, `tap`, `scroll`, `type_text` (plain and with `clear`)
-and `press_key home` executing and observed on the device, the server-side recording and its trajectory, teardown
-through the env's reattach and `close()`, and a model (Claude Sonnet 5.5, by function calling against the env's MCP
-tools) completing a 23-step task end to end: the gif above.
-Earlier, on 2026-09-21: device listing and resolution, the capability map, the health probe, `doctor`, the
-pixel-to-point conversion, screenshots, `ui_state` compaction, `list_apps` and the full recording download path.
+18 tools listed through the gateway, `screenshot`, `ui_state`, `tap`, `swipe`, `scroll`, `type_text` (plain and with
+`clear`) and `press_key home` executing and observed on the device, the server-side recording and its trajectory,
+teardown through the env's reattach and `close()`, and the bundle end to end: `agent-env run mobilerun --model
+anthropic/claude-sonnet-5-5` seated the model, which completed the task in 22 tool calls, and the run passed its
+check and kept its recording (the gif above). Earlier, on 2026-09-21: device listing and resolution, the capability
+map, the health probe, `doctor`, the pixel-to-point conversion, screenshots, `ui_state` compaction, `list_apps` and
+the recording download path.
 
 **Not verified yet**: anything on **Android** (the account's only Android device is in maintenance), so treat the
-Android path, including `press_key`'s Android codes, as unexercised; the bundle's `agent-env run mobilerun`, which goes
-through an A2A agent rather than a model calling the tools directly; and `clear_text`, `double_tap`, `long_press`,
-`open_deep_link` and the clipboard tools on a device. See
+Android path, including `press_key`'s Android codes, as unexercised; driving it with an A2A agent (`examples/`); and
+`clear_text`, `double_tap`, `long_press`, `open_deep_link` and the clipboard tools on a device. See
 [Known limits](#known-limits) for `launch_app`.
 
 ## Known limits
@@ -221,6 +234,13 @@ Stated rather than papered over.
 - **`launch_app` on iOS needs care.** On one iPhone, launching Settings by bundle id returned `ok`, Settings never
   opened, and the phone stopped answering screenshots and gestures while still reporting `ready`. Tapping the app's
   icon instead worked on another phone. One case, so not a rule, but prefer the icon on iOS until it is understood.
+- **A force-quit is a fresh launch, not a fresh app.** `mobilerun_play`'s `stop_apps` force-quits apps before an
+  episode so a phone that ran the task before doesn't start on its answer, but an app keeps what it saved: Maps reopens
+  on the region it last showed, with recently viewed places marked. The route itself is not restored, so the task is
+  still the model's to do. Write tasks whose answer isn't left on screen by the last run.
+- **The MCP server has no authentication.** Run on its own (`python -m agentenv_mobilerun.server.main`) it listens on
+  `127.0.0.1` only, with the MCP library's DNS-rebinding protection on. The image sets `MCP_HOST=0.0.0.0` because the
+  gateway, the only client on its network, has to reach it. Don't expose that port anywhere else.
 - **Location Services is off on MobileRun's phones.** Maps and anything else that needs "my location" asks for a start
   point instead, so give tasks explicit places.
 - **A badged icon is labelled by its badge.** In an iPhone's accessibility tree, the Settings icon with a red badge
@@ -248,14 +268,15 @@ it is a MobileRun support item.
 **A tool is missing from the agent's list**: the phone's capability map says it is unsupported. `agent-env mobilerun
 doctor` prints the supported and unsupported sets.
 
-**`agent-env run mobilerun` fails at `deploy_agent`**: there is no default agent. See
-[The bundled task](#the-bundled-task); `agent-env mobilerun doctor` reports it.
+**`agent-env run mobilerun` fails at `mobilerun_play`**: no model endpoint, or one that rejects the request. `doctor`
+reports a missing endpoint; the step's error repeats what the endpoint said, and if it wants headers (an attribution
+proxy, say), set `MOBILERUN_MODEL_HEADERS`.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `agent-env mobilerun doctor [--skip-agent]` | The four checks that explain every failure (key, devices, capabilities, health probe) and the agent `agent-env run mobilerun` deploys. Exits non-zero if the bundle could not run, or with `--skip-agent` if the env could not deploy, so it works as a CI gate |
+| `agent-env mobilerun doctor [--skip-model] [--platform P]` | The four checks that explain every failure (key, devices, capabilities, health probe) and the model endpoint `agent-env run mobilerun` uses. Considers devices of any platform unless given one. Exits non-zero if the bundle could not run, or with `--skip-model` if the env could not deploy, so it works as a CI gate |
 | `agent-env mobilerun devices [--probe]` | List devices; `--probe` screenshots each one to prove it is drivable |
 | `agent-env mobilerun setup` | Build the MCP image and register the env (`--device`, `--record`, `--platform`) |
 | `agent-env mobilerun probe-global --device ID --yes` | Discover what the undocumented `global` action codes do on a device |
@@ -267,12 +288,12 @@ src/agentenv_mobilerun/
   env.py                MobileRunEnv: resolve and health-probe a phone, deploy the MCP server behind a gateway
   client.py             the device-plane client, on MobileRun's official mobilerun-sdk
   server/               the MCP server image: main.py (tools, env card), Dockerfile, requirements.txt
-  steps/                the mobilerun_collect_recording task step
+  steps/                the task steps: play (seat a model), check_screen (grade), collect_recording
   cli.py                agent-env mobilerun: doctor, devices, setup, probe-global
   capabilities.py       the capability map's wire encoding, shared by the env and the server
   api_key.py            key resolution, free of agent-env so doctor runs without it
-  bundles/mobilerun/    the open-settings task and the smoke eval
-examples/               the same task as a standalone JSON, with notes on supplying an agent
+  bundles/mobilerun/    the graded maps-walking task and the smoke eval
+examples/               a task that drives the phone with an A2A agent instead of a seated model
 tests/                  client, server, env, CLI, recording and env-card tests; no device or network needed
 docs/media/             the demo gif
 ```

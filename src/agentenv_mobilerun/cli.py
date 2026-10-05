@@ -113,17 +113,18 @@ def devices(platform: Optional[str], all_states: bool, probe: bool, as_json: boo
 
 @mobilerun.command(name="doctor")
 @click.option("--device", "device_id", help="Check this device instead of the first idle one.")
-@click.option("--platform", type=click.Choice(["android", "ios"]), default="android", show_default=True)
+@click.option("--platform", type=click.Choice(["android", "ios"]), default=None,
+              help="Only consider devices of this platform. Default: any.")
 @click.option(
-    "--skip-agent",
+    "--skip-model",
     is_flag=True,
-    help="Don't check for an agent: you deploy the env and drive its MCP server yourself.",
+    help="Don't check for a model endpoint: you deploy the env and drive its MCP server yourself.",
 )
-def doctor(device_id: Optional[str], platform: str, skip_agent: bool) -> None:
-    """Check the four things that explain every MobileRun failure, and the agent the bundle needs.
+def doctor(device_id: Optional[str], platform: Optional[str], skip_model: bool) -> None:
+    """Check the four things that explain every MobileRun failure, and the model endpoint the bundle needs.
 
     Exits non-zero if `agent-env run mobilerun` would not be able to run, so it is usable
-    as a gate in a script or a CI job. With --skip-agent, if the env could not be deployed.
+    as a gate in a script or a CI job. With --skip-model, if the env could not be deployed.
     """
     from agentenv_mobilerun.api_key import resolve_api_key
 
@@ -206,18 +207,18 @@ def doctor(device_id: Optional[str], platform: str, skip_agent: bool) -> None:
                 return 1
             click.echo("   ok — the device returned a screenshot")
 
-            click.echo("5. Default agent (the one `agent-env run mobilerun` deploys)")
-            if skip_agent:
-                click.echo("   skipped (--skip-agent)")
+            click.echo("5. Model endpoint (what `agent-env run mobilerun` drives the phone with)")
+            if skip_model:
+                click.echo("   skipped (--skip-model)")
                 return 0
-            agent_id, problem = _check_default_agent()
+            endpoint, problem = _check_model_endpoint()
             if problem:
                 click.echo(f"   FAILED — {problem}", err=True)
                 return 1
-            if agent_id is None:
+            if endpoint is None:
                 click.echo("   skipped — agentenv-framework is not installed, so nothing could run the bundle")
                 return 0
-            click.echo(f"   ok — {agent_id!r} is registered")
+            click.echo(f"   ok — {endpoint}")
             return 0
 
     try:
@@ -226,42 +227,28 @@ def doctor(device_id: Optional[str], platform: str, skip_agent: bool) -> None:
         _fail(str(exc))
 
 
-def _check_default_agent() -> tuple[Optional[str], Optional[str]]:
-    """``(agent id, problem)`` for the agent the bundle's run will deploy.
+def _check_model_endpoint() -> tuple[Optional[str], Optional[str]]:
+    """``(endpoint, problem)`` for the model endpoint the bundle's ``mobilerun_play`` step calls.
 
-    The bundle's ``deploy_agent`` step names no agent, so it deploys the configured
-    default -- ``[agents] default_a2a_agent_id``, else ``a2a-default`` -- which means a user
-    who already has one keeps it. The cost is that the framework's preflight checks only an
-    agent a task NAMES, and the framework ships no agent: on a clean install the run
-    finds out only at ``deploy_agent``, after the phone has been resolved and the gateway
-    stood up. This resolves the id the way ``deploy_agent`` does and reads it, so the gap
-    shows up here instead.
-
-    ``(None, None)`` without the framework, where nothing could run the bundle anyway.
+    Resolved the way the step resolves it: agent-env's ``[model]`` config, or ``LITELLM_BASE_URL``
+    and ``LITELLM_API_KEY``. Only that it is configured is checked, not that it answers; the key
+    is never printed. ``(None, None)`` without the framework, where nothing could run the bundle.
     """
     try:
-        from agent_env.a2a_agent import A2AAgent
         from agent_env.config import get_config
-        from agent_env.store.base import NotFoundError
     except ImportError:
         return None, None
     try:
-        agent_id = get_config().get_default_a2a_agent_id()
-    except Exception as exc:  # a broken [agents] table: deploy_agent would raise the same
-        return None, f"could not resolve the default agent: {exc}"
-    try:
-        A2AAgent.get(agent_id)
-    except NotFoundError:
-        return agent_id, (
-            f"no A2A agent {agent_id!r} in the store. The bundle deploys the default agent, and "
-            f"agent-env ships none. Register one under that id with "
-            f"`agent-env a2a-agent put --id {agent_id} --dockerfile <your agent's Dockerfile>`, "
-            f"or point [agents] default_a2a_agent_id in .agentenv/config.toml at one you already "
-            f"have. Pass --skip-agent if you only deploy the env."
-        )
-    except Exception as exc:
-        return agent_id, f"could not read agent {agent_id!r}: {exc}"
-    return agent_id, None
+        config = get_config()
+        base_url = config.get_litellm_base_url()
+        key = config.get_litellm_api_key()
+    except Exception as exc:  # ConfigError and friends: the step would raise the same
+        return None, (f"{exc} The bundle's model calls need an endpoint; set [model] base_url and api_key in "
+                      f".agentenv/config.toml, or LITELLM_BASE_URL and LITELLM_API_KEY. Pass --skip-model if "
+                      f"you only deploy the env.")
+    if not key:
+        return None, "the model endpoint has no API key: set [model] api_key, or LITELLM_API_KEY."
+    return base_url, None
 
 
 # ----------------------------------------------------------------------- setup

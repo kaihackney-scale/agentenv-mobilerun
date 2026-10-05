@@ -1,7 +1,6 @@
-Drive a real MobileRun cloud phone: deploy the env, hand it to an agent, collect the recording.
+Seat a model on a real MobileRun phone, have it get walking directions in Maps, and grade the screen it leaves.
 
-Needs `MOBILERUN_API_KEY` and one ready device on the account, `agent-env mobilerun setup` once
-to build and register the MCP server image, and an A2A agent: the task deploys your configured
-default (`[agents] default_a2a_agent_id`, else `a2a-default`), and agent-env ships none, so on a
-clean install register one with `agent-env a2a-agent put --id a2a-default --dockerfile ...`.
-`agent-env mobilerun doctor` checks all of it and exits non-zero if the run would fail.
+Needs `MOBILERUN_API_KEY`, one ready device on the account, `agent-env mobilerun setup --record` once to build and
+register the MCP server image, and a model endpoint: `[model]` in `.agentenv/config.toml`, or `LITELLM_BASE_URL` and
+`LITELLM_API_KEY`. `--model` picks the model; the task's default is a LiteLLM id, so change it to one your endpoint
+serves. `agent-env mobilerun doctor` checks all of it and exits non-zero if the run would fail.

@@ -106,7 +106,7 @@ def run(monkeypatch):
         args: list[str],
         client: Optional[FakeClient] = None,
         key: str = "dr_sk_test",
-        agent: Optional[tuple] = ("a2a-default", None),
+        model: Optional[tuple] = ("https://models.example/v1", None),
     ):
         fake = client or FakeClient()
         monkeypatch.setattr(cli_mod, "_client", lambda: fake)
@@ -114,8 +114,8 @@ def run(monkeypatch):
         monkeypatch.setenv("MOBILERUN_API_KEY", key)
         # Found, unless a test says otherwise: the real check reads the framework's store,
         # which here would be the developer's own ~/.local/state. It has its own tests below.
-        if agent is not None:
-            monkeypatch.setattr(cli_mod, "_check_default_agent", lambda: agent)
+        if model is not None:
+            monkeypatch.setattr(cli_mod, "_check_model_endpoint", lambda: model)
         result = CliRunner().invoke(cli_mod.mobilerun, args, catch_exceptions=False)
         return result, fake
 
@@ -232,28 +232,43 @@ def test_doctor_still_passes_when_only_the_fleet_report_fails(run):
     assert "could not read the rest of the fleet" in result.stdout
 
 
-def test_doctor_is_a_gate_when_the_bundle_has_no_agent(run):
-    """`agent-env run mobilerun` deploys the default agent and the framework ships none; on
-    a clean install the run only found out at deploy_agent, after the phone and the
-    gateway were up. doctor finds out first, and says how to fix it."""
-    missing = ("a2a-default", "no A2A agent 'a2a-default' in the store. Register one ...")
-    result, _ = run(["doctor"], FakeClient([_device("a", platform="android")]), agent=missing)
+def test_doctor_is_a_gate_when_the_bundle_has_no_model_endpoint(run):
+    """`agent-env run mobilerun` seats a model; with no endpoint configured it would fail at
+    mobilerun_play, after the phone and the gateway were up. doctor finds out first."""
+    missing = (None, "No model endpoint configured: set [model] base_url ...")
+    result, _ = run(["doctor"], FakeClient([_device("a", platform="ios")]), model=missing)
     assert result.exit_code == 1
-    assert "no A2A agent 'a2a-default'" in result.stderr
+    assert "No model endpoint configured" in result.stderr
 
 
-def test_doctor_skip_agent_is_a_deploy_only_gate(run):
-    """Someone who deploys the env and drives its MCP server directly needs no agent."""
-    missing = ("a2a-default", "no A2A agent 'a2a-default' in the store.")
-    result, _ = run(["doctor", "--skip-agent"], FakeClient([_device("a", platform="android")]), agent=missing)
+def test_doctor_skip_model_is_a_deploy_only_gate(run):
+    """Someone who deploys the env and drives its MCP server directly needs no model."""
+    missing = (None, "No model endpoint configured")
+    result, _ = run(["doctor", "--skip-model"], FakeClient([_device("a", platform="ios")]), model=missing)
     assert result.exit_code == 0
-    assert "skipped (--skip-agent)" in result.stdout
+    assert "skipped (--skip-model)" in result.stdout
 
 
-def test_doctor_reports_the_agent_it_found(run):
-    result, _ = run(["doctor"], FakeClient([_device("a", platform="android")]), agent=("my-agent", None))
+def test_doctor_reports_the_endpoint_it_found(run):
+    result, _ = run(["doctor"], FakeClient([_device("a", platform="ios")]), model=("https://models.example/v1", None))
     assert result.exit_code == 0
-    assert "'my-agent' is registered" in result.stdout
+    assert "ok — https://models.example/v1" in result.stdout
+
+
+def test_doctor_considers_any_platform_by_default(run):
+    """It defaulted to Android, so on an account whose only ready phones are iPhones -- which is
+    MobileRun's fleet in practice -- the first command in the README failed while setup and deploy
+    would have worked."""
+    fake = FakeClient([_device("a", platform="ios")])
+    result, fake = run(["doctor"], fake)
+    assert result.exit_code == 0
+    assert ("resolve_device", {"platform": None, "device_id": None}) in fake.calls
+
+
+def test_doctor_platform_still_narrows_when_given(run):
+    fake = FakeClient([_device("a", platform="ios")])
+    _, fake = run(["doctor", "--platform", "android"], fake)
+    assert ("resolve_device", {"platform": "android", "device_id": None}) in fake.calls
 
 
 @pytest.fixture
@@ -262,32 +277,29 @@ def isolated_framework(monkeypatch, tmp_path):
     config = pytest.importorskip("agent_env.config")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("AGENT_ENV_CONFIG", raising=False)
+    for name in ("LITELLM_BASE_URL", "LITELLM_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
     config.reset_config()
     yield tmp_path
     config.reset_config()
 
 
-def test_the_real_check_finds_no_agent_on_a_clean_install(isolated_framework):
-    """Against the framework itself, not a stand-in: a clean store has no 'a2a-default'."""
-    agent_id, problem = cli_mod._check_default_agent()
-    assert agent_id == "a2a-default"
-    assert problem and "agent-env a2a-agent put --id a2a-default" in problem
+def test_the_real_check_finds_no_endpoint_on_a_clean_install(isolated_framework):
+    """Against the framework itself, not a stand-in."""
+    endpoint, problem = cli_mod._check_model_endpoint()
+    assert endpoint is None
+    assert problem and "LITELLM_BASE_URL" in problem
 
 
-def test_the_real_check_honours_a_configured_default(isolated_framework, monkeypatch):
-    """The reason the bundle's task names no agent: a user's [agents] default_a2a_agent_id
-    has to win, exactly as it does in deploy_agent."""
+def test_the_real_check_reads_the_env_vars_the_step_reads(isolated_framework, monkeypatch):
     from agent_env.config import reset_config
 
-    config_file = isolated_framework / "config.toml"
-    config_file.write_text('[agents]\ndefault_a2a_agent_id = "my-phone-agent"\n')
-    monkeypatch.setenv("AGENT_ENV_CONFIG", str(config_file))
+    monkeypatch.setenv("LITELLM_BASE_URL", "https://models.example")
+    monkeypatch.setenv("LITELLM_API_KEY", "sk-test")
     reset_config()
-
-    agent_id, problem = cli_mod._check_default_agent()
-    assert agent_id == "my-phone-agent"
-    assert "'my-phone-agent'" in problem
+    endpoint, problem = cli_mod._check_model_endpoint()
+    assert (endpoint, problem) == ("https://models.example", None)
 
 
 def test_doctor_flags_a_device_that_cannot_record(run):

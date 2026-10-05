@@ -1,0 +1,62 @@
+[
+  {
+    "id": "deploy",
+    "type": "deploy_env",
+    "env_id": "mobilerun",
+    "ttl_seconds": 1800
+  },
+  {
+    "id": "play",
+    "type": "mobilerun_play",
+    "env_step_id": "deploy",
+    "depends_on": [
+      {
+        "task_step_id": "deploy"
+      }
+    ],
+    "model": "anthropic/claude-sonnet-5-5",
+    "max_steps": 40,
+    "prompt": "Using the Maps app, get walking directions from the Brandenburg Gate to Museum Island in Berlin, and leave the phone showing the walking route.",
+    "stop_apps": [
+      "com.apple.Maps"
+    ]
+  },
+  {
+    "id": "check",
+    "type": "mobilerun_check_screen",
+    "env_step_id": "deploy",
+    "depends_on": [
+      {
+        "task_step_id": "play"
+      }
+    ],
+    "any_of": [
+      [
+        "Museum Island",
+        "Museumsinsel"
+      ],
+      [
+        "Brandenburg Gate",
+        "Brandenburger Tor"
+      ],
+      [
+        "walk",
+        "walking",
+        "zu Fuß"
+      ],
+      [
+        " min"
+      ]
+    ]
+  },
+  {
+    "id": "collect",
+    "type": "mobilerun_collect_recording",
+    "key_prefix": "recordings",
+    "depends_on": [
+      {
+        "task_step_id": "check"
+      }
+    ]
+  }
+]

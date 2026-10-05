@@ -70,6 +70,8 @@ mobilerun = "agentenv_mobilerun.env:MobileRunEnv"
 
 [project.entry-points."agent_env.task_steps"]
 mobilerun_collect_recording = "agentenv_mobilerun.steps.collect_recording:CollectRecordingStep"
+mobilerun_play = "agentenv_mobilerun.steps.play:PlayStep"
+mobilerun_check_screen = "agentenv_mobilerun.steps.check_screen:CheckScreenStep"
 
 # The bundle ships inside the wheel, so `pip install agentenv-mobilerun` is followed by
 # `agent-env run mobilerun` with nothing to clone. The entry-point VALUE names the package

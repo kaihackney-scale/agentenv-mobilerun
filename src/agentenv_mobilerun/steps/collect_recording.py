@@ -1,13 +1,7 @@
 """``mobilerun_collect_recording`` — copy a run's recording into durable storage.
 
-Registered through agent-env's ``[task_steps]`` seam:
-
-.. code-block:: toml
-
-    [task_steps]
-    impls = ["agentenv_mobilerun.steps.collect_recording:CollectRecordingStep"]
-
-Place it **after** the step that prompts the agent. It stops the recording that
+Registered on the ``agent_env.task_steps`` entry point by installing the package. Place it
+**after** the step that drives the phone (``mobilerun_play``, or an agent's ``prompt_agent``). It stops the recording that
 :class:`~agentenv_mobilerun.env.MobileRunEnv` started, waits for the server-side upload,
 and copies both artifacts into the configured object store.
 
